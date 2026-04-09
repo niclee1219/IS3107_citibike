@@ -142,21 +142,26 @@ erDiagram
 
 ## Setup
 
-### 1. Install dependencies
+### 1. Clone repo
+```bash
+git clone https://github.com/niclee1219/IS3107_citibike.git && cd IS3107_citibike
+```
+
+### 2. Install dependencies
 
 ```bash
 pip install apache-airflow
 pip install -r requirements.txt
 ```
 
-### 2. Point Airflow at this project's DAGs folder
+### 3. Point Airflow at this project's DAGs folder
 
 ```bash
-export AIRFLOW__CORE__DAGS_FOLDER=/path/to/this/project/dags
+export AIRFLOW__CORE__DAGS_FOLDER=$(pwd)/dags
 export AIRFLOW__CORE__LOAD_EXAMPLES=False
 ```
 
-### 3. Run DAGs in order
+### 4. Run DAGs in order
 
 ```bash
 airflow standalone
