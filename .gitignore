@@ -1,0 +1,12 @@
+# Ignore everything by default — only DAG source code is tracked
+*
+.claude/
+
+# Un-ignore project source files
+!.gitignore
+!README.md
+!requirements.txt
+
+# Un-ignore the dags directory and its Python files only
+!dags/
+!dags/*.py
