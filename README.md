@@ -161,7 +161,15 @@ export AIRFLOW__CORE__DAGS_FOLDER=$(pwd)/dags
 export AIRFLOW__CORE__LOAD_EXAMPLES=False
 ```
 
-### 4. Run DAGs in order
+### 4. (optional) Setup Google Cloud credentials for BigQuery loading
+
+Download the service account key JSON onto the local device, set the environment variable to point to the file
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/your/credentials.json"
+```
+
+### 5. Run DAGs in order
 
 ```bash
 airflow standalone
