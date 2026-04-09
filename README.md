@@ -15,9 +15,9 @@ ETLT pipeline built with Apache Airflow to collect, engineer, and stage data for
 
 | Source                                                                          | DAG                  | Description                                                                               |
 | ------------------------------------------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------- |
-| [Citibike S3 (Lyft)](https://s3.amazonaws.com/tripdata/)                        | `citibike_trips`     | Monthly trip ZIPs covering Jan 2025 – Mar 2026                                            |
+| [Citibike S3 (Lyft)](https://s3.amazonaws.com/tripdata/index.html)              | `citibike_trips`     | Monthly trip ZIPs covering Jan 2025 – Mar 2026                                            |
 | [GBFS Lyft API](https://gbfs.lyft.com/gbfs/2.3/bkn/en/station_information.json) | `citibike_stations`  | Live station reference data (short_name, lat, lon, name)                                  |
-| [Open-Meteo Archive API](https://archive-api.open-meteo.com/)                   | `weather_historical` | Hourly historical weather for 3 Manhattan locations (Harlem, Midtown, Financial District) |
+| [Open-Meteo Archive API](https://open-meteo.com/en/docs/historical-weather-api#:~:text=Download%20CSV-,API%20URL,-(Open%20in)                   | `weather_historical` | Hourly historical weather for 3 Manhattan locations (Harlem, Midtown, Financial District) |
 | [python-holidays](https://github.com/vacanza/python-holidays)                   | `holidays_us_ny`     | US federal and NY state holidays for 2025–2026                                            |
 
 ## Pipeline Architecture
