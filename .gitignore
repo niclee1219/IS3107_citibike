@@ -1,6 +1,5 @@
 # Ignore everything by default — only DAG source code is tracked
 *
-.claude/
 
 # Un-ignore project source files
 !.gitignore
@@ -10,3 +9,21 @@
 # Un-ignore the dags directory and its Python files only
 !dags/
 !dags/*.py
+
+# Output data
+!dags/output/
+!dags/output/holidays/
+!dags/output/holidays/*.csv
+!dags/output/citibike_stations/
+!dags/output/citibike_stations/*.csv
+!dags/output/weather/
+!dags/output/weather/*.csv
+dags/output/citibike_trips/
+dags/output/feature_store/
+
+# Truncated 100-row samples
+!dags/output/samples/
+!dags/output/samples/citibike_trips/
+!dags/output/samples/citibike_trips/*.csv
+!dags/output/samples/feature_store/
+!dags/output/samples/feature_store/*.csv
