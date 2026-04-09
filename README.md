@@ -4,21 +4,21 @@ ETLT pipeline built with Apache Airflow to collect, engineer, and stage data for
 
 ## Team
 
-| Name | GitHub |
-| ---- | ------ |
-| Beverley Teo | [@bevteo](https://github.com/bevteo) |
-| Nathan Kew | [@nathankkh](https://github.com/nathankkh) |
+| Name         | GitHub                                       |
+| ------------ | -------------------------------------------- |
+| Beverley Teo | [@bevteo](https://github.com/bevteo)         |
+| Nathan Kew   | [@nathankkh](https://github.com/nathankkh)   |
 | Nicholas Lee | [@niclee1219](https://github.com/niclee1219) |
-| Terri Tan | [@placeholder](#) |
+| Terri Tan    | [@territxl](https://github.com/territxl)     |
 
 ## Data Sources
 
-| Source | DAG | Description |
-| ------ | --- | ----------- |
-| [Citibike S3 (Lyft)](https://s3.amazonaws.com/tripdata/) | `citibike_trips` | Monthly trip ZIPs covering Jan 2025 – Mar 2026 |
-| [GBFS Lyft API](https://gbfs.lyft.com/gbfs/2.3/bkn/en/station_information.json) | `citibike_stations` | Live station reference data (short_name, lat, lon, name) |
-| [Open-Meteo Archive API](https://archive-api.open-meteo.com/) | `weather_historical` | Hourly historical weather for 3 Manhattan locations (Harlem, Midtown, Financial District) |
-| [python-holidays](https://github.com/vacanza/python-holidays) | `holidays_us_ny` | US federal and NY state holidays for 2025–2026 |
+| Source                                                                          | DAG                  | Description                                                                               |
+| ------------------------------------------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------- |
+| [Citibike S3 (Lyft)](https://s3.amazonaws.com/tripdata/)                        | `citibike_trips`     | Monthly trip ZIPs covering Jan 2025 – Mar 2026                                            |
+| [GBFS Lyft API](https://gbfs.lyft.com/gbfs/2.3/bkn/en/station_information.json) | `citibike_stations`  | Live station reference data (short_name, lat, lon, name)                                  |
+| [Open-Meteo Archive API](https://archive-api.open-meteo.com/)                   | `weather_historical` | Hourly historical weather for 3 Manhattan locations (Harlem, Midtown, Financial District) |
+| [python-holidays](https://github.com/vacanza/python-holidays)                   | `holidays_us_ny`     | US federal and NY state holidays for 2025–2026                                            |
 
 ## Pipeline Architecture
 
