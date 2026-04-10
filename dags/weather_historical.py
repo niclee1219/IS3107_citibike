@@ -18,7 +18,7 @@ Locations:
     financial_district  (40.7074, -74.0113)
 
 Output (dags/output/weather/):
-    weather_harlem_2025-01.csv  …  weather_harlem_2026-03.csv  (×3 locations)
+    weather_harlem_2025-01.csv  …  weather_harlem_2026-03.csv  (x3 locations)
 
 Columns:
     datetime, location, lat, lon,
@@ -32,6 +32,13 @@ import os
 
 import pendulum
 from airflow.sdk import dag, task
+from google.cloud import bigquery
+from google.cloud.exceptions import NotFound
+
+BQ_PROJECT_ID       = 'is3107-491906'
+BQ_DATASET_ID       = 'citibike'
+BQ_TABLE_ID         = 'weather_hourly'
+BQ_STAGING_TABLE_ID = 'staging_weather_hourly'
 
 LOCATIONS: list[dict] = [
     {"name": "harlem",             "lat": 40.8116, "lon": -73.9465},
@@ -78,7 +85,7 @@ def weather_historical():
     @task
     def extract_weather(location_name: str) -> str:
         """
-        EXTRACT — Fetch the full hourly time series (Jan 2025 – Mar 2026) for one
+        EXTRACT — Fetch the full hourly time series (Jan 2025 - Mar 2026) for one
         location from the Open-Meteo archive API.
 
         Location coordinates are looked up from the module-level LOCATIONS constant
@@ -217,11 +224,86 @@ def weather_historical():
 
         return saved
 
-    # ── Task wiring (3 parallel E→T→L chains, one per location) ────────────
-    location_names = get_location_names()
-    raw_paths      = extract_weather.expand(location_name=location_names)
+    @task
+    def ingest_weather(csv_paths: list[str]) -> None:
+        """
+        INGEST — Replace all rows for one location in BigQuery with fresh data.
+        - Insert into staging, then
+        - Merge by DELETE location + INSERT pattern so rolling features recomputed across the full series are reflected in BQ on every run.
+        """
+        import pandas as pd
+
+        frames = [pd.read_csv(p, encoding='utf-8-sig') for p in csv_paths]
+        df = pd.concat(frames, ignore_index=True)
+
+        df['datetime'] = pd.to_datetime(df['datetime'])
+        df['is_rainy'] = df['is_rainy'].map({'True': True, 'False': False})
+        location_name = df['location'].iloc[0]
+        print(f"[{location_name}] Read {len(df):,} rows from {len(csv_paths)} monthly files")
+
+        client = bigquery.Client(project=BQ_PROJECT_ID)
+        staging_table_id = f"{BQ_PROJECT_ID}.{BQ_DATASET_ID}.{BQ_STAGING_TABLE_ID}"
+        prod_table_id    = f"{BQ_PROJECT_ID}.{BQ_DATASET_ID}.{BQ_TABLE_ID}"
+
+        schema = [
+            bigquery.SchemaField("datetime",         "TIMESTAMP", mode="REQUIRED"),
+            bigquery.SchemaField("location",         "STRING",    mode="REQUIRED"),
+            bigquery.SchemaField("lat",              "FLOAT",     mode="REQUIRED"),
+            bigquery.SchemaField("lon",              "FLOAT",     mode="REQUIRED"),
+            bigquery.SchemaField("temperature_2m",   "FLOAT",     mode="REQUIRED"),
+            bigquery.SchemaField("apparent_temp",    "FLOAT",     mode="REQUIRED"),
+            bigquery.SchemaField("precipitation_mm", "FLOAT",     mode="REQUIRED"),
+            bigquery.SchemaField("windspeed",        "FLOAT",     mode="REQUIRED"),
+            bigquery.SchemaField("snowfall",         "FLOAT",     mode="REQUIRED"),
+            bigquery.SchemaField("snow_depth",       "FLOAT",     mode="REQUIRED"),
+            bigquery.SchemaField("is_rainy",         "BOOLEAN",   mode="REQUIRED"),
+            bigquery.SchemaField("precip_last_3h",   "FLOAT",     mode="REQUIRED"),
+            bigquery.SchemaField("mins_since_rain",  "FLOAT",     mode="REQUIRED"),
+        ]
+
+        dataset = bigquery.Dataset(f"{BQ_PROJECT_ID}.{BQ_DATASET_ID}")
+        dataset.location = "asia-east1"
+        client.create_dataset(dataset, exists_ok=True)
+
+        try:
+            client.get_table(staging_table_id)
+            client.get_table(prod_table_id)
+        except NotFound:
+            client.create_table(
+                bigquery.Table(staging_table_id, schema=schema), exists_ok=True
+            )
+            prod_table = bigquery.Table(prod_table_id, schema=schema)
+            prod_table.time_partitioning = bigquery.TimePartitioning(field='datetime')
+            prod_table.clustering_fields = ['location']
+            client.create_table(prod_table, exists_ok=True)
+
+        # Load full location data to staging (overwrite)
+        job_config = bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
+        )
+        load_job = client.load_table_from_dataframe(df, staging_table_id, job_config=job_config)
+        load_job.result()
+        print(f"[{location_name}] Loaded {len(df):,} rows to {staging_table_id}")
+
+        # Replace this location's rows in prod
+        client.query(
+            f"DELETE FROM `{prod_table_id}` WHERE location = '{location_name}'"
+        ).result()
+        client.query(f"""
+            INSERT INTO `{prod_table_id}`
+            SELECT datetime, location, lat, lon,
+                   temperature_2m, apparent_temp, precipitation_mm, windspeed,
+                   snowfall, snow_depth, is_rainy, precip_last_3h, mins_since_rain
+            FROM `{staging_table_id}`
+        """).result()
+        print(f"[{location_name}] Replaced rows in {prod_table_id}")
+
+    # ── Task wiring (3 parallel E>T>L>I chains, one per location) ───────────
+    location_names  = get_location_names()
+    raw_paths       = extract_weather.expand(location_name=location_names)
     processed_paths = transform_weather.expand(raw_path=raw_paths)
-    load_weather.expand(processed_path=processed_paths)
+    saved_paths     = load_weather.expand(processed_path=processed_paths)
+    ingest_weather.expand(csv_paths=saved_paths)
 
 
 weather_historical()
