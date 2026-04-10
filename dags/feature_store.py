@@ -187,8 +187,8 @@ def feature_store():
         import h3
 
         # -- Load sources -----------------------------------------------------
-        trips    = pd.read_csv(trips_path)
-        stations = pd.read_csv(stations_path)
+        trips    = pd.read_csv(trips_path, dtype={"start_station_id": str, "end_station_id": str})
+        stations = pd.read_csv(stations_path, dtype={"short_name": str})
         weather  = pd.read_csv(weather_path)
         holidays = pd.read_csv(holidays_path)
 
@@ -364,7 +364,9 @@ def feature_store():
                      'is_holiday', 'is_raining']
         for col in bool_cols:
             if col in df.columns:
-                df[col] = df[col].map({'True': True, 'False': False})
+                df[col] = df[col].astype(str).str.strip().str.lower().map(
+                    {'true': True, 'false': False}
+                )
 
         month_start = f"{month_label}-01"
         month_end   = pd.Period(month_label, 'M').end_time.strftime('%Y-%m-%d')

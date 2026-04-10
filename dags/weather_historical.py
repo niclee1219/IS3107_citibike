@@ -166,6 +166,7 @@ def weather_historical():
             .shift(1)
             .rolling(window=3, min_periods=1)
             .sum()
+            .fillna(0)
             .round(2)
         )
 
@@ -176,7 +177,7 @@ def weather_historical():
             if precip > 0.1:
                 last_rain_idx = i
             mins_since.append(
-                None if last_rain_idx is None else (i - last_rain_idx) * 60
+                0 if last_rain_idx is None else (i - last_rain_idx) * 60
             )
         df["mins_since_rain"] = mins_since
 
@@ -239,7 +240,7 @@ def weather_historical():
         df = pd.concat(frames, ignore_index=True)
 
         df['datetime'] = pd.to_datetime(df['datetime'])
-        df['is_rainy'] = df['is_rainy'].map({'True': True, 'False': False})
+        df['is_rainy'] = df['is_rainy'].astype(str).map({'True': True, 'False': False}).fillna(False).astype(bool)
         location_name = df['location'].iloc[0]
         print(f"[{location_name}] Read {len(df):,} rows from {len(csv_paths)} monthly files")
 
@@ -248,7 +249,7 @@ def weather_historical():
         prod_table_id    = f"{BQ_PROJECT_ID}.{BQ_DATASET_ID}.{BQ_TABLE_ID}"
 
         schema = [
-            bigquery.SchemaField("datetime",         "TIMESTAMP", mode="REQUIRED"),
+            bigquery.SchemaField("datetime",         "DATETIME", mode="REQUIRED"), #nyc have the same time
             bigquery.SchemaField("location",         "STRING",    mode="REQUIRED"),
             bigquery.SchemaField("lat",              "FLOAT",     mode="REQUIRED"),
             bigquery.SchemaField("lon",              "FLOAT",     mode="REQUIRED"),

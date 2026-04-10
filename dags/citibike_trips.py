@@ -162,7 +162,6 @@ def citibike_trips():
     def ingest_citibike_trips(csv_path: str, month_label: str) -> None:
         """
         INGEST — Delete this month's rows from BigQuery then append fresh data.
-        Note that there's no ride_id based on source data, so adopt a (delete where, append) strategy
         Idempotent: re-running the same month replaces rather than duplicates.
         """
         import pandas as pd
@@ -173,9 +172,11 @@ def citibike_trips():
         client = bigquery.Client(project=BQ_PROJECT_ID)
         prod_table_id = f"{BQ_PROJECT_ID}.{BQ_DATASET_ID}.{BQ_TABLE_ID}"
 
-        df = pd.read_csv(csv_path, encoding='utf-8-sig')
+        df = pd.read_csv(csv_path, encoding='utf-8-sig', dtype={"start_station_id": str, "end_station_id": str})
         df['started_at'] = pd.to_datetime(df['started_at'])
         df['ended_at']   = pd.to_datetime(df['ended_at'])
+        df['start_station_id'] = df['start_station_id'].astype(str)
+        df['end_station_id']   = df['end_station_id'].astype(str)
         print(f"[{month_label}] Read {len(df):,} trips from {csv_path}")
 
         month_start = f"{month_label}-01"
@@ -189,6 +190,7 @@ def citibike_trips():
             client.get_table(prod_table_id)
         except NotFound:
             schema = [
+                bigquery.SchemaField("ride_id",           "STRING",    mode="REQUIRED"),
                 bigquery.SchemaField("rideable_type",     "STRING",    mode="REQUIRED"),
                 bigquery.SchemaField("started_at",        "TIMESTAMP", mode="REQUIRED"),
                 bigquery.SchemaField("ended_at",          "TIMESTAMP", mode="REQUIRED"),
