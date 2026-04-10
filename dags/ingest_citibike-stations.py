@@ -68,3 +68,4 @@ def load_static_station_to_bq(csv_file_path, project_id=GC_PROJECT_ID, dataset_i
     
 if __name__ == "__main__":
     load_static_station_to_bq('./output/citibike_stations/stations.csv')
+

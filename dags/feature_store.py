@@ -5,16 +5,16 @@ Joins Citibike trip data with station info, weather, and holidays to
 produce a feature-engineered dataset ready for XGBoost model training.
 
 Depends on upstream DAGs having already staged their CSVs:
-    citibike_trips     →  dags/output/citibike_trips/trips_YYYY-MM.csv
-    citibike_stations  →  dags/output/citibike_stations/stations.csv
-    weather_historical →  dags/output/weather/weather_*_YYYY-MM.csv
-    holidays_us_ny     →  dags/output/holidays/holidays_us_ny.csv
+    citibike_trips     →  output/citibike_trips/trips_YYYY-MM.csv
+    citibike_stations  →  output/citibike_stations/stations.csv
+    weather_historical →  output/weather/weather_*_YYYY-MM.csv
+    holidays_us_ny     →  output/holidays/holidays_us_ny.csv
 
 E  extract_*          - validate/load each source into a temp file
 T  transform_features - join all sources, compute all features
 L  load_features      - write features_YYYY-MM.csv, clean up temps
 
-Output (dags/output/feature_store/):
+Output (output/feature_store/):
     features_YYYY-MM.csv
 
 Feature columns:
@@ -41,7 +41,7 @@ BQ_PROJECT_ID = 'is3107-491906'
 BQ_DATASET_ID = 'citibike'
 BQ_TABLE_ID   = 'features'
 
-_DAGS_DIR = os.path.dirname(__file__)
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
 @dag(
@@ -78,7 +78,7 @@ def feature_store():
         """
         EXTRACT - Validate the monthly trips CSV exists and return its path.
         """
-        path = os.path.join(_DAGS_DIR, "output", "citibike_trips", f"trips_{month_label}.csv")
+        path = os.path.join(_PROJECT_ROOT, "output", "citibike_trips", f"trips_{month_label}.csv")
         if not os.path.exists(path):
             raise FileNotFoundError(
                 f"trips_{month_label}.csv not found - run citibike_trips DAG first."
@@ -91,7 +91,7 @@ def feature_store():
         """
         EXTRACT - Validate stations.csv exists and return its path.
         """
-        path = os.path.join(_DAGS_DIR, "output", "citibike_stations", "stations.csv")
+        path = os.path.join(_PROJECT_ROOT, "output", "citibike_stations", "stations.csv")
         if not os.path.exists(path):
             raise FileNotFoundError(
                 "stations.csv not found - run citibike_stations DAG first."
@@ -109,7 +109,7 @@ def feature_store():
         import tempfile
         import pandas as pd
 
-        weather_dir    = os.path.join(_DAGS_DIR, "output", "weather")
+        weather_dir    = os.path.join(_PROJECT_ROOT, "output", "weather")
         location_names = ["harlem", "midtown", "financial_district"]
 
         frames: list[pd.DataFrame] = []
@@ -153,7 +153,7 @@ def feature_store():
         """
         EXTRACT - Validate holidays CSV exists and return its path.
         """
-        path = os.path.join(_DAGS_DIR, "output", "holidays", "holidays_us_ny.csv")
+        path = os.path.join(_PROJECT_ROOT, "output", "holidays", "holidays_us_ny.csv")
         if not os.path.exists(path):
             raise FileNotFoundError(
                 "holidays_us_ny.csv not found - run holidays_us_ny DAG first."
@@ -327,7 +327,7 @@ def feature_store():
         """
         import pandas as pd
 
-        output_dir = os.path.join(_DAGS_DIR, "output", "feature_store")
+        output_dir = os.path.join(_PROJECT_ROOT, "output", "feature_store")
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"features_{month_label}.csv")
 

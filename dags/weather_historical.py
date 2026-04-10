@@ -17,7 +17,7 @@ Locations:
     midtown             (40.7549, -73.9840)
     financial_district  (40.7074, -74.0113)
 
-Output (dags/output/weather/):
+Output (output/weather/):
     weather_harlem_2025-01.csv  …  weather_harlem_2026-03.csv  (x3 locations)
 
 Columns:
@@ -39,6 +39,8 @@ BQ_PROJECT_ID       = 'is3107-491906'
 BQ_DATASET_ID       = 'citibike'
 BQ_TABLE_ID         = 'weather_hourly'
 BQ_STAGING_TABLE_ID = 'staging_weather_hourly'
+
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 LOCATIONS: list[dict] = [
     {"name": "harlem",             "lat": 40.8116, "lon": -73.9465},
@@ -206,7 +208,7 @@ def weather_historical():
         df["_month"] = pd.to_datetime(df["datetime"]).dt.strftime("%Y-%m")
         location_name = df["location"].iloc[0]
 
-        output_dir = os.path.join(os.path.dirname(__file__), "output", "weather")
+        output_dir = os.path.join(_PROJECT_ROOT, "output", "weather")
         os.makedirs(output_dir, exist_ok=True)
 
         saved: list[str] = []

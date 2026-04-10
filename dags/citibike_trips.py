@@ -23,7 +23,7 @@ Source:
 Exclusions:
     ZIP entries whose filename starts with "jc-" (Jersey City data)
 
-Output (dags/output/citibike_trips/):
+Output (output/citibike_trips/):
     trips_YYYY-MM.csv
 
 Columns:
@@ -43,7 +43,10 @@ BQ_PROJECT_ID = 'is3107-491906'
 BQ_DATASET_ID = 'citibike'
 BQ_TABLE_ID   = 'trips'
 
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
 KEEP_COLUMNS = [
+    "ride_id",  
     "rideable_type",
     "started_at",
     "ended_at",
@@ -139,7 +142,7 @@ def citibike_trips():
         """
         import shutil
 
-        output_dir = os.path.join(os.path.dirname(__file__), "output", "citibike_trips")
+        output_dir = os.path.join(_PROJECT_ROOT, "output", "citibike_trips")
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"trips_{month_label}.csv")
 

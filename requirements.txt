@@ -5,3 +5,4 @@ numpy>=1.26.0
 h3>=4.0.0
 google-cloud-bigquery>=3.11.0
 pyarrow>=23.0.0
+pandas_gbq>=0.30.0

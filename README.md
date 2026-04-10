@@ -13,12 +13,12 @@ ETLT pipeline built with Apache Airflow to collect, engineer, and stage data for
 
 ## Data Sources
 
-| Source                                                                          | DAG                  | Description                                                                               |
-| ------------------------------------------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------- |
-| [Citibike S3 (Lyft)](https://s3.amazonaws.com/tripdata/index.html)              | `citibike_trips`     | Monthly trip ZIPs covering Jan 2025 – Mar 2026                                            |
-| [GBFS Lyft API](https://gbfs.lyft.com/gbfs/2.3/bkn/en/station_information.json) | `citibike_stations`  | Live station reference data (short_name, lat, lon, name)                                  |
-| [Open-Meteo Archive API](https://open-meteo.com/en/docs/historical-weather-api#:~:text=Download%20CSV-,API%20URL,-(Open%20in))                   | `weather_historical` | Hourly historical weather for 3 Manhattan locations (Harlem, Midtown, Financial District) |
-| [python-holidays](https://github.com/vacanza/python-holidays)                   | `holidays_us_ny`     | US federal and NY state holidays for 2025–2026                                            |
+| Source                                                                                                                           | DAG                  | Description                                                                               |
+| -------------------------------------------------------------------------------------------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------- |
+| [Citibike S3 (Lyft)](https://s3.amazonaws.com/tripdata/index.html)                                                               | `citibike_trips`     | Monthly trip ZIPs covering Jan 2025 – Mar 2026                                            |
+| [GBFS Lyft API](https://gbfs.lyft.com/gbfs/2.3/bkn/en/station_information.json)                                                  | `citibike_stations`  | Live station reference data (short_name, lat, lon, name)                                  |
+| [Open-Meteo Archive API](<https://open-meteo.com/en/docs/historical-weather-api#:~:text=Download%20CSV-,API%20URL,-(Open%20in)>) | `weather_historical` | Hourly historical weather for 3 Manhattan locations (Harlem, Midtown, Financial District) |
+| [python-holidays](https://github.com/vacanza/python-holidays)                                                                    | `holidays_us_ny`     | US federal and NY state holidays for 2025–2026                                            |
 
 ## Pipeline Architecture
 
@@ -136,13 +136,14 @@ erDiagram
 | -------------------- | ---------- | ------- | ------------------------------------------- |
 | `weather_historical` | `@monthly` | ETLT    | `output/weather/weather_<loc>_YYYY-MM.csv`  |
 | `holidays_us_ny`     | `@yearly`  | ETL     | `output/holidays/holidays_us_ny.csv`        |
-| `citibike_stations`  | `@monthly` | ETL     | `output/citibike/stations.csv`              |
-| `citibike_trips`     | `@monthly` | ETLT    | `output/citibike/trips_YYYY-MM.csv`         |
+| `citibike_stations`  | `@weekly`  | ETL     | `output/citibike_stations/stations.csv`     |
+| `citibike_trips`     | `@monthly` | ETLT    | `output/citibike_trips/trips_YYYY-MM.csv`   |
 | `feature_store`      | `@monthly` | ETL     | `output/feature_store/features_YYYY-MM.csv` |
 
 ## Setup
 
 ### 1. Clone repo
+
 ```bash
 git clone https://github.com/niclee1219/IS3107_citibike.git && cd IS3107_citibike
 ```
@@ -161,21 +162,37 @@ export AIRFLOW__CORE__DAGS_FOLDER=$(pwd)/dags
 export AIRFLOW__CORE__LOAD_EXAMPLES=False
 ```
 
-### 4. (optional) Setup Google Cloud credentials for BigQuery loading
+### 4. Install the Google Cloud CLI
 
-Download the service account key JSON onto the local device, set the environment variable to point to the file
+Follow the official install guide for your OS: https://cloud.google.com/sdk/docs/install-sdk
+
+macOS (Homebrew):
 
 ```bash
-export GOOGLE_APPLICATION_CREDENTIALS="/path/to/your/credentials.json"
+brew install --cask google-cloud-sdk
 ```
 
-### 5. Run DAGs in order
+After installing, initialise the CLI:
+
+```bash
+gcloud init
+```
+
+### 5. Set up Application Default Credentials (ADC)
+
+Full guide: https://cloud.google.com/docs/authentication/set-up-adc-local-dev-environment
+
+```bash
+gcloud auth application-default login
+```
+
+### 6. Run DAGs in order
 
 ```bash
 airflow standalone
 ```
 
-Trigger in this order (feature_store depends on all others):
+Trigger in this order (`feature_store` depends on all others):
 
 1. `citibike_stations` — station reference data (needed before trips & features)
 2. `weather_historical` — historical weather with rolling features (run once)
@@ -186,7 +203,7 @@ Trigger in this order (feature_store depends on all others):
 ## Output Structure
 
 ```
-dags/output/
+output/
 ├── weather/
 │   ├── weather_harlem_2025-01.csv          # ~744 rows per file
 │   ├── weather_midtown_2025-01.csv
@@ -194,8 +211,9 @@ dags/output/
 │   └── ...                                 # ×45 files (3 locations × 15 months)
 ├── holidays/
 │   └── holidays_us_ny.csv                  # US federal + NY state, 2025–2026
-├── citibike/
-│   ├── stations.csv                        # short_name / name / lat / lon
+├── citibike_stations/
+│   └── stations.csv                        # short_name / name / lat / lon
+├── citibike_trips/
 │   ├── trips_2025-01.csv
 │   └── ...                                 # one file per month through 2026-03
 └── feature_store/
@@ -232,7 +250,3 @@ OD pairs are encoded with a deterministic MD5 hash so the same origin-destinatio
 - **Euclidean** (`euclidean_dist_m`): haversine great-circle distance between start and end stations
 - **Manhattan** (`manhattan_dist_m`): sum of north-south leg + east-west leg haversine distances
 - **Ratio** (`dist_ratio`): euclidean / manhattan — values near 1.0 mean the route is direct
-
-## BigQuery Loading
-
-BigQuery loading is intentionally deferred — verify staged CSVs first, then uncomment `google-cloud-bigquery` in `requirements.txt`.

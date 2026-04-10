@@ -13,7 +13,7 @@ I  ingest_stations     — load to BigQuery staging, MERGE into production
 Source:
     https://gbfs.lyft.com/gbfs/2.3/bkn/en/station_information.json
 
-Output (dags/output/citibike/):
+Output (output/citibike_stations/):
     stations.csv
 
 Cloud (BigQuery):
@@ -37,6 +37,8 @@ from google.cloud.exceptions import NotFound
 import pandas as pd
 
 CSV_FIELDNAMES = ["short_name", "name", "lat", "lon"]
+
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 # BigQuery configuration
 BQ_PROJECT_ID = 'is3107-491906'
@@ -92,7 +94,7 @@ def citibike_stations():
         """
         LOAD — Write station reference data to CSV. Full-refresh on every run.
         """
-        output_dir = os.path.join(os.path.dirname(__file__), "output", "citibike_stations")
+        output_dir = os.path.join(_PROJECT_ROOT, "output", "citibike_stations")
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, "stations.csv")
 

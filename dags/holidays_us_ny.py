@@ -8,7 +8,7 @@ E  extract_holidays    — generate raw holiday entries per year
 T  transform_holidays  — classify federal vs state, merge, sort, deduplicate
 L  load_holidays       — write holidays_us_ny.csv (full-refresh)
 
-Output (dags/output/holidays/):
+Output (output/holidays/):
     holidays_us_ny.csv
 
 Columns:
@@ -28,6 +28,8 @@ from google.cloud.exceptions import NotFound
 BQ_PROJECT_ID = 'is3107-491906'
 BQ_DATASET_ID = 'citibike'
 BQ_TABLE_ID   = 'holidays_us_ny'
+
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 CSV_FIELDNAMES = ["date", "name", "year", "holiday_type"]
 
@@ -91,7 +93,7 @@ def holidays_us_ny():
         """
         LOAD — Write final holiday list to CSV (full-refresh).
         """
-        output_dir = os.path.join(os.path.dirname(__file__), "output", "holidays")
+        output_dir = os.path.join(_PROJECT_ROOT, "output", "holidays")
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, "holidays_us_ny.csv")
 
