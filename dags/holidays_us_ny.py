@@ -22,6 +22,12 @@ import os
 
 import pendulum
 from airflow.sdk import dag, task
+from google.cloud import bigquery
+from google.cloud.exceptions import NotFound
+
+BQ_PROJECT_ID = 'is3107-491906'
+BQ_DATASET_ID = 'citibike'
+BQ_TABLE_ID   = 'holidays_us_ny'
 
 CSV_FIELDNAMES = ["date", "name", "year", "holiday_type"]
 
@@ -97,10 +103,50 @@ def holidays_us_ny():
         print(f"Saved {len(rows)} holidays → {out_path}")
         return out_path
 
+    @task
+    def ingest_holidays(csv_path: str) -> None:
+        """
+        INGEST — Load holidays CSV directly to BigQuery with WRITE_TRUNCATE.
+        No staging table, always do a complete full-refresh.
+        """
+        import pandas as pd
+
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+        client = bigquery.Client(project=BQ_PROJECT_ID)
+        prod_table_id = f"{BQ_PROJECT_ID}.{BQ_DATASET_ID}.{BQ_TABLE_ID}"
+
+        df = pd.read_csv(csv_path, encoding='utf-8-sig')
+        print(f"Read {len(df)} holidays from {csv_path}")
+
+        dataset = bigquery.Dataset(f"{BQ_PROJECT_ID}.{BQ_DATASET_ID}")
+        dataset.location = "asia-east1"
+        client.create_dataset(dataset, exists_ok=True)
+
+        try:
+            client.get_table(prod_table_id)
+        except NotFound:
+            schema = [
+                bigquery.SchemaField("date",         "DATE",    mode="REQUIRED"),
+                bigquery.SchemaField("name",         "STRING",  mode="REQUIRED"),
+                bigquery.SchemaField("year",         "INTEGER", mode="REQUIRED"),
+                bigquery.SchemaField("holiday_type", "STRING",  mode="REQUIRED"),
+            ]
+            client.create_table(bigquery.Table(prod_table_id, schema=schema), exists_ok=True)
+
+        job_config = bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
+        )
+        load_job = client.load_table_from_dataframe(df, prod_table_id, job_config=job_config)
+        load_job.result()
+        print(f"Loaded {len(df)} holidays to {prod_table_id}")
+
     # ── Task wiring ──────────────────────────────────────────────────────────
     raw_years = extract_holidays.expand(year=[2025, 2026])
     clean     = transform_holidays(raw_years)
-    load_holidays(clean)
+    csv_path  = load_holidays(clean)
+    ingest_holidays(csv_path)
 
 
 holidays_us_ny()

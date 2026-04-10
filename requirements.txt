@@ -3,6 +3,5 @@ holidays>=0.46
 pandas>=2.0.0
 numpy>=1.26.0
 h3>=4.0.0
-
-# Uncomment when ready to push to BigQuery:
-# google-cloud-bigquery>=3.11.0
+google-cloud-bigquery>=3.11.0
+pyarrow>=23.0.0

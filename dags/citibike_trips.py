@@ -15,6 +15,8 @@ E  extract_citibike_trips    — download ZIP from S3 → temp file (claim-check
 T  transform_citibike_trips  — unzip, concat CSVs, filter columns, write temp CSV
 L  load_citibike_trips       — move temp CSV to output, clean up temp ZIP
 
+I  ingest_citibike_trips     — load to BigQuery staging, MERGE into production
+
 Source:
     https://s3.amazonaws.com/tripdata/{YYYYMM}-citibike-tripdata.zip
 
@@ -34,6 +36,12 @@ from __future__ import annotations
 import os
 import pendulum
 from airflow.sdk import dag, task
+from google.cloud import bigquery
+from google.cloud.exceptions import NotFound
+
+BQ_PROJECT_ID = 'is3107-491906'
+BQ_DATASET_ID = 'citibike'
+BQ_TABLE_ID   = 'trips'
 
 KEEP_COLUMNS = [
     "rideable_type",
@@ -147,15 +155,73 @@ def citibike_trips():
 
         return out_path
 
+    @task
+    def ingest_citibike_trips(csv_path: str, month_label: str) -> None:
+        """
+        INGEST — Delete this month's rows from BigQuery then append fresh data.
+        Note that there's no ride_id based on source data, so adopt a (delete where, append) strategy
+        Idempotent: re-running the same month replaces rather than duplicates.
+        """
+        import pandas as pd
+
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+        client = bigquery.Client(project=BQ_PROJECT_ID)
+        prod_table_id = f"{BQ_PROJECT_ID}.{BQ_DATASET_ID}.{BQ_TABLE_ID}"
+
+        df = pd.read_csv(csv_path, encoding='utf-8-sig')
+        df['started_at'] = pd.to_datetime(df['started_at'])
+        df['ended_at']   = pd.to_datetime(df['ended_at'])
+        print(f"[{month_label}] Read {len(df):,} trips from {csv_path}")
+
+        month_start = f"{month_label}-01"
+        month_end   = pd.Period(month_label, 'M').end_time.strftime('%Y-%m-%d')
+
+        dataset = bigquery.Dataset(f"{BQ_PROJECT_ID}.{BQ_DATASET_ID}")
+        dataset.location = "asia-east1"
+        client.create_dataset(dataset, exists_ok=True)
+
+        try:
+            client.get_table(prod_table_id)
+        except NotFound:
+            schema = [
+                bigquery.SchemaField("rideable_type",     "STRING",    mode="REQUIRED"),
+                bigquery.SchemaField("started_at",        "TIMESTAMP", mode="REQUIRED"),
+                bigquery.SchemaField("ended_at",          "TIMESTAMP", mode="REQUIRED"),
+                bigquery.SchemaField("start_station_id",  "STRING",    mode="REQUIRED"),
+                bigquery.SchemaField("end_station_id",    "STRING",    mode="REQUIRED"),
+                bigquery.SchemaField("member_casual",     "STRING",    mode="REQUIRED"),
+            ]
+            prod_table = bigquery.Table(prod_table_id, schema=schema)
+            prod_table.time_partitioning = bigquery.TimePartitioning(field='started_at')
+            prod_table.clustering_fields = ['rideable_type', 'member_casual']
+            client.create_table(prod_table, exists_ok=True)
+
+        delete_query = f"""
+            DELETE FROM `{prod_table_id}`
+            WHERE DATE(started_at) BETWEEN '{month_start}' AND '{month_end}'
+        """
+        client.query(delete_query).result()
+        print(f"[{month_label}] Deleted existing rows for {month_start} - {month_end}")
+
+        job_config = bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+        )
+        load_job = client.load_table_from_dataframe(df, prod_table_id, job_config=job_config)
+        load_job.result()
+        print(f"[{month_label}] Appended {len(df):,} trips to {prod_table_id}")
+
     # ── Task wiring ──────────────────────────────────────────────────────────
-    # Using Airflow Jinja templates inherently resolves function parameter 
+    # Using Airflow Jinja templates inherently resolves function parameter
     # conflicts while eliminating the need for an isolated context-fetching task.
-    
+
     month_str = "{{ data_interval_start.strftime('%Y%m') }}"
     month_label = "{{ data_interval_start.strftime('%Y-%m') }}"
 
-    zip_path = extract_citibike_trips(month_str)
+    zip_path      = extract_citibike_trips(month_str)
     temp_csv_path = transform_citibike_trips(zip_path, month_label)
-    load_citibike_trips(temp_csv_path, zip_path, month_label)
+    csv_path      = load_citibike_trips(temp_csv_path, zip_path, month_label)
+    ingest_citibike_trips(csv_path, month_label)
 
 citibike_trips()
