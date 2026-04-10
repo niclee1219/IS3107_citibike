@@ -34,6 +34,7 @@ import pendulum
 from airflow.sdk import dag, task
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
+import pandas as pd
 
 CSV_FIELDNAMES = ["short_name", "name", "lat", "lon"]
 
@@ -168,7 +169,7 @@ def citibike_stations():
         merge_job.result()
         print(f"LOG: Merged data into {prod_table_id}")
 
-    # ── Task wiring ──────────────────────────────────────────────────────────
+    # -- Task wiring ----------------------------------------------------------
     raw   = extract_stations()
     clean = transform_stations(raw)
     csv_path = load_stations(clean)
