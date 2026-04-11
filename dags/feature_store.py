@@ -46,7 +46,7 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 @dag(
     dag_id="feature_store",
-    start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
+    start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     end_date=pendulum.datetime(2026, 4, 1, tz="UTC"),
     schedule="@monthly",
     catchup=True,

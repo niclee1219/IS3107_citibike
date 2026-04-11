@@ -15,7 +15,7 @@ E  extract_citibike_trips    — download ZIP from S3 → temp file (claim-check
 T  transform_citibike_trips  — unzip, concat CSVs, filter columns, write temp CSV
 L  load_citibike_trips       — move temp CSV to output, clean up temp ZIP
 
-I  ingest_citibike_trips     — load to BigQuery staging, MERGE into production
+I  ingest_citibike_trips     — load to BigQuery staging (WRITE_TRUNCATE), MERGE into production on ride_id
 
 Source:
     https://s3.amazonaws.com/tripdata/{YYYYMM}-citibike-tripdata.zip
@@ -57,7 +57,7 @@ KEEP_COLUMNS = [
 
 @dag(
     dag_id="citibike_trips",
-    start_date=pendulum.datetime(2026, 1, 1, tz="UTC"), 
+    start_date=pendulum.datetime(2025, 1, 1, tz="UTC"), 
     end_date=pendulum.datetime(2026, 4, 1, tz="UTC"), # This stops it at 202603
     schedule="@monthly",
     catchup=True,
@@ -161,8 +161,9 @@ def citibike_trips():
     @task
     def ingest_citibike_trips(csv_path: str, month_label: str) -> None:
         """
-        INGEST — Delete this month's rows from BigQuery then append fresh data.
-        Idempotent: re-running the same month replaces rather than duplicates.
+        INGEST — Load month's trips to a staging table (WRITE_TRUNCATE),
+        then MERGE into production on ride_id.
+        Idempotent: re-running the same month upserts rather than duplicates.
         """
         import pandas as pd
 
@@ -170,7 +171,8 @@ def citibike_trips():
             raise FileNotFoundError(f"CSV file not found: {csv_path}")
 
         client = bigquery.Client(project=BQ_PROJECT_ID)
-        prod_table_id = f"{BQ_PROJECT_ID}.{BQ_DATASET_ID}.{BQ_TABLE_ID}"
+        staging_table_id = f"{BQ_PROJECT_ID}.{BQ_DATASET_ID}.staging_{BQ_TABLE_ID}"
+        prod_table_id    = f"{BQ_PROJECT_ID}.{BQ_DATASET_ID}.{BQ_TABLE_ID}"
 
         df = pd.read_csv(csv_path, encoding='utf-8-sig', dtype={"start_station_id": str, "end_station_id": str})
         df['started_at'] = pd.to_datetime(df['started_at'])
@@ -179,43 +181,62 @@ def citibike_trips():
         df['end_station_id']   = df['end_station_id'].astype(str)
         print(f"[{month_label}] Read {len(df):,} trips from {csv_path}")
 
-        month_start = f"{month_label}-01"
-        month_end   = pd.Period(month_label, 'M').end_time.strftime('%Y-%m-%d')
-
         dataset = bigquery.Dataset(f"{BQ_PROJECT_ID}.{BQ_DATASET_ID}")
         dataset.location = "asia-east1"
         client.create_dataset(dataset, exists_ok=True)
 
+        schema = [
+            bigquery.SchemaField("ride_id",           "STRING",    mode="REQUIRED"),
+            bigquery.SchemaField("rideable_type",     "STRING",    mode="REQUIRED"),
+            bigquery.SchemaField("started_at",        "DATETIME", mode="REQUIRED"),
+            bigquery.SchemaField("ended_at",          "DATETIME", mode="REQUIRED"),
+            bigquery.SchemaField("start_station_id",  "STRING",    mode="REQUIRED"),
+            bigquery.SchemaField("end_station_id",    "STRING",    mode="REQUIRED"),
+            bigquery.SchemaField("member_casual",     "STRING",    mode="REQUIRED"),
+        ]
+
         try:
+            client.get_table(staging_table_id)
             client.get_table(prod_table_id)
         except NotFound:
-            schema = [
-                bigquery.SchemaField("ride_id",           "STRING",    mode="REQUIRED"),
-                bigquery.SchemaField("rideable_type",     "STRING",    mode="REQUIRED"),
-                bigquery.SchemaField("started_at",        "TIMESTAMP", mode="REQUIRED"),
-                bigquery.SchemaField("ended_at",          "TIMESTAMP", mode="REQUIRED"),
-                bigquery.SchemaField("start_station_id",  "STRING",    mode="REQUIRED"),
-                bigquery.SchemaField("end_station_id",    "STRING",    mode="REQUIRED"),
-                bigquery.SchemaField("member_casual",     "STRING",    mode="REQUIRED"),
-            ]
+            staging_table = bigquery.Table(staging_table_id, schema=schema)
+            client.create_table(staging_table, exists_ok=True)
+
             prod_table = bigquery.Table(prod_table_id, schema=schema)
             prod_table.time_partitioning = bigquery.TimePartitioning(field='started_at')
             prod_table.clustering_fields = ['rideable_type', 'member_casual']
             client.create_table(prod_table, exists_ok=True)
 
-        delete_query = f"""
-            DELETE FROM `{prod_table_id}`
-            WHERE DATE(started_at) BETWEEN '{month_start}' AND '{month_end}'
-        """
-        client.query(delete_query).result()
-        print(f"[{month_label}] Deleted existing rows for {month_start} - {month_end}")
-
+        # Load to staging (truncate first so re-runs are clean)
         job_config = bigquery.LoadJobConfig(
-            write_disposition=bigquery.WriteDisposition.WRITE_APPEND
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
         )
-        load_job = client.load_table_from_dataframe(df, prod_table_id, job_config=job_config)
+        load_job = client.load_table_from_dataframe(df, staging_table_id, job_config=job_config)
         load_job.result()
-        print(f"[{month_label}] Appended {len(df):,} trips to {prod_table_id}")
+        print(f"[{month_label}] Loaded {len(df):,} trips to {staging_table_id}")
+
+        # Merge staging into production (UPSERT on ride_id)
+        merge_query = f"""
+        MERGE `{prod_table_id}` TARGET
+        USING `{staging_table_id}` SOURCE
+        ON TARGET.ride_id = SOURCE.ride_id
+        WHEN MATCHED THEN
+            UPDATE SET
+                rideable_type    = SOURCE.rideable_type,
+                started_at       = SOURCE.started_at,
+                ended_at         = SOURCE.ended_at,
+                start_station_id = SOURCE.start_station_id,
+                end_station_id   = SOURCE.end_station_id,
+                member_casual    = SOURCE.member_casual
+        WHEN NOT MATCHED THEN
+            INSERT (ride_id, rideable_type, started_at, ended_at,
+                    start_station_id, end_station_id, member_casual)
+            VALUES (SOURCE.ride_id, SOURCE.rideable_type, SOURCE.started_at, SOURCE.ended_at,
+                    SOURCE.start_station_id, SOURCE.end_station_id, SOURCE.member_casual)
+        """
+        merge_job = client.query(merge_query)
+        merge_job.result()
+        print(f"[{month_label}] Merged trips into {prod_table_id}")
 
     # ── Task wiring ──────────────────────────────────────────────────────────
     # Using Airflow Jinja templates inherently resolves function parameter
