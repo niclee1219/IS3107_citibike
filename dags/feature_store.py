@@ -182,11 +182,33 @@ def feature_store():
         """
         import hashlib
         import tempfile
+        import time
         import numpy as np
         import pandas as pd
         import h3
 
-        # -- Load sources -----------------------------------------------------
+        _STAGES = 9
+        _t0 = time.perf_counter()
+
+        def _stage(n: int, label: str) -> None:
+            elapsed = time.perf_counter() - _t0
+            print(f"[{month_label}] [{n}/{_STAGES}] {label}  (elapsed: {elapsed:.1f}s)")
+
+        def _apply_chunked(df: pd.DataFrame, func, label: str) -> pd.Series:
+            """Run df.apply(func, axis=1) in 10% chunks, printing progress each step."""
+            n = len(df)
+            chunk = max(1, n // 10)
+            parts = []
+            for start in range(0, n, chunk):
+                parts.append(df.iloc[start:start + chunk].apply(func, axis=1))
+                pct = min(100, (start + chunk) * 100 // n)
+                elapsed = time.perf_counter() - _t0
+                print(f"  {label}: {pct:3d}%  ({min(start + chunk, n):,}/{n:,} rows)  "
+                      f"[{elapsed:.1f}s]")
+            return pd.concat(parts)
+
+        # -- Load sources ----------------------------------------------------- [1/9]
+        _stage(1, "Loading sources")
         trips    = pd.read_csv(trips_path, dtype={"start_station_id": str, "end_station_id": str})
         stations = pd.read_csv(stations_path, dtype={"short_name": str})
         weather  = pd.read_csv(weather_path)
@@ -199,7 +221,8 @@ def feature_store():
         trips["started_at"] = pd.to_datetime(trips["started_at"])
         trips["ended_at"]   = pd.to_datetime(trips["ended_at"])
 
-        # -- Join start station -----------------------------------------------
+        # -- Join start station ----------------------------------------------- [2/9]
+        _stage(2, "Joining start stations")
         start_stations = stations.rename(columns={
             "short_name": "start_station_id",
             "lat": "start_lat", "lon": "start_lon",
@@ -209,7 +232,8 @@ def feature_store():
             on="start_station_id", how="left",
         )
 
-        # -- Join end station -------------------------------------------------
+        # -- Join end station ------------------------------------------------- [3/9]
+        _stage(3, "Joining end stations")
         end_stations = stations.rename(columns={
             "short_name": "end_station_id",
             "lat": "end_lat", "lon": "end_lon",
@@ -221,41 +245,52 @@ def feature_store():
         trips = trips.dropna(subset=["start_lat", "start_lon", "end_lat", "end_lon"])
         print(f"[{month_label}] {len(trips):,} trips after station join")
 
-        # -- Join weather -----------------------------------------------------
+        # -- Join weather & holidays ------------------------------------------ [4/9]
+        _stage(4, "Joining weather & holidays")
         trips["weather_key"] = (
             trips["started_at"].dt.floor("h").dt.strftime("%Y-%m-%dT%H:00:00")
         )
+        before_weather = len(trips)
         trips = trips.merge(
             weather.rename(columns={"datetime": "weather_key"}),
             on="weather_key", how="left",
         )
+        trips = trips.dropna(subset=["temperature_2m"])
+        dropped = before_weather - len(trips)
+        if dropped:
+            print(f"[{month_label}] Dropped {dropped:,} trips with no matching weather hour")
+        print(f"[{month_label}] {len(trips):,} trips after weather join")
 
-        # -- Join holidays ----------------------------------------------------
         holiday_dates     = set(holidays["date"].unique())
         trips["date_str"] = trips["started_at"].dt.strftime("%Y-%m-%d")
         trips["is_holiday"] = trips["date_str"].isin(holiday_dates)
 
-        # -- Temporal features ------------------------------------------------
+        # -- Temporal features ------------------------------------------------ [5/9]
+        _stage(5, "Computing temporal features")
         trips["hour"]         = trips["started_at"].dt.hour
         trips["month"]        = trips["started_at"].dt.month
         trips["is_weekend"]   = trips["started_at"].dt.dayofweek >= 5
         trips["is_rush_hour"] = trips["hour"].isin({7, 8, 9, 17, 18, 19})
 
-        # -- Trip features ----------------------------------------------------
+        # -- Trip features ---------------------------------------------------- [6/9]
+        _stage(6, "Computing trip features")
         duration_sec          = (trips["ended_at"] - trips["started_at"]).dt.total_seconds()
         trips["log_duration"] = np.log(duration_sec.clip(lower=1))
         trips["is_member"]    = trips["member_casual"] == "member"
         trips["is_ebike"]     = trips["rideable_type"] == "electric_bike"
 
-        # -- H3 spatial features ----------------------------------------------
+        # -- H3 spatial features ---------------------------------------------- [7/9]
+        _stage(7, "Computing H3 spatial features  (6 apply passes — slowest step)")
         for res in [7, 8, 9]:
-            trips[f"origin_h3_r{res}"] = trips.apply(
+            trips[f"origin_h3_r{res}"] = _apply_chunked(
+                trips,
                 lambda r, r_=res: h3.latlng_to_cell(r["start_lat"], r["start_lon"], r_),
-                axis=1,
+                label=f"  H3 origin r{res}",
             )
-            trips[f"dest_h3_r{res}"] = trips.apply(
+            trips[f"dest_h3_r{res}"] = _apply_chunked(
+                trips,
                 lambda r, r_=res: h3.latlng_to_cell(r["end_lat"], r["end_lon"], r_),
-                axis=1,
+                label=f"  H3 dest   r{res}",
             )
 
         trips["od_pair_r9"] = trips["origin_h3_r9"] + "_" + trips["dest_h3_r9"]
@@ -266,7 +301,9 @@ def feature_store():
             lambda od: float(int(hashlib.md5(od.encode()).hexdigest(), 16) % 1_000_000)
         )
 
-        # -- Distance features ------------------------------------------------
+        # -- Distance features ------------------------------------------------ [8/9]
+        _stage(8, "Computing distance features  (2 apply passes)")
+
         def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
             from math import radians, sin, cos, asin, sqrt
             R = 6_371_000.0
@@ -274,16 +311,18 @@ def feature_store():
             a = sin((lat2 - lat1) / 2) ** 2 + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2
             return 2 * R * asin(sqrt(a))
 
-        trips["euclidean_dist_m"] = trips.apply(
+        trips["euclidean_dist_m"] = _apply_chunked(
+            trips,
             lambda r: haversine_m(r["start_lat"], r["start_lon"], r["end_lat"], r["end_lon"]),
-            axis=1,
+            label="  euclidean_dist_m",
         )
-        trips["manhattan_dist_m"] = trips.apply(
+        trips["manhattan_dist_m"] = _apply_chunked(
+            trips,
             lambda r: (
                 haversine_m(r["start_lat"], r["start_lon"], r["end_lat"],   r["start_lon"]) +
                 haversine_m(r["start_lat"], r["start_lon"], r["start_lat"], r["end_lon"])
             ),
-            axis=1,
+            label="  manhattan_dist_m",
         )
         trips["dist_ratio"] = np.where(
             trips["manhattan_dist_m"] > 0,
@@ -291,7 +330,8 @@ def feature_store():
             1.0,
         )
 
-        # -- Select & rename final columns ------------------------------------
+        # -- Select & rename final columns ------------------------------------ [9/9]
+        _stage(9, "Selecting & writing feature matrix")
         base_cols = [
             "log_duration", "rideable_type", "is_member", "is_ebike",
             "started_at", "hour", "is_weekend", "is_rush_hour", "month", "is_holiday",
@@ -380,12 +420,12 @@ def feature_store():
             client.get_table(prod_table_id)
         except NotFound:
             schema = [
-                bigquery.SchemaField("ride_id",           "STRING",    mode="NULLABLE"),
+                bigquery.SchemaField("ride_id",           "STRING",    mode="REQUIRED"),
                 bigquery.SchemaField("log_duration",      "FLOAT",     mode="REQUIRED"),
                 bigquery.SchemaField("rideable_type",     "STRING",    mode="REQUIRED"),
                 bigquery.SchemaField("is_member",         "BOOLEAN",   mode="REQUIRED"),
                 bigquery.SchemaField("is_ebike",          "BOOLEAN",   mode="REQUIRED"),
-                bigquery.SchemaField("started_at",        "TIMESTAMP", mode="REQUIRED"),
+                bigquery.SchemaField("started_at",        "DATETIME", mode="REQUIRED"),
                 bigquery.SchemaField("hour",              "INTEGER",   mode="REQUIRED"),
                 bigquery.SchemaField("is_weekend",        "BOOLEAN",   mode="REQUIRED"),
                 bigquery.SchemaField("is_rush_hour",      "BOOLEAN",   mode="REQUIRED"),
