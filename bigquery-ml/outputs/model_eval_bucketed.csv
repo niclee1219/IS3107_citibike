@@ -1,0 +1,6 @@
+trip_length_bucket,num_trips,avg_actual_minutes,avg_predicted_minutes,avg_error_minutes
+under 5 min,1542559,3.39,3.93,0.53
+5–10 min,2069400,7.25,6.89,-0.37
+10–20 min,1574124,13.88,11.79,-2.09
+20–40 min,587156,26.63,19.09,-7.53
+over 40 min,106200,74.14,21.16,-52.98

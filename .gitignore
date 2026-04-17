@@ -24,3 +24,7 @@ output/feature_store/
 # Truncated 100-row samples 
 !output/samples/
 !output/samples/**
+
+# BigQuery ML files
+!bigquery-ml/
+!bigquery-ml/**
