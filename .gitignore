@@ -28,3 +28,7 @@ output/feature_store/
 # BigQuery ML files
 !bigquery-ml/
 !bigquery-ml/**
+
+# Streamlit Files
+!streamlit-app/
+!streamlit-app/**
